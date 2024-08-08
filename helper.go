@@ -96,13 +96,13 @@ func (rpt *Report) writeHTML(lineHt float64, htmlStr string) {
 		if underscoreLvl > 0 {
 			styleStr += "U"
 		}
-		rpt.pdf.SetFont("", styleStr, 0)
+		rpt.Pdf.SetFont("", styleStr, 0)
 	}
 	list := basicTokenize(htmlStr)
 	for _, el := range list {
 		switch el.Cat {
 		case 'T':
-			rpt.pdf.Text(el.Str, rpt.pageBreak-rpt.footerHeight)
+			rpt.Pdf.Text(el.Str, rpt.pageBreak-rpt.footerHeight)
 		case 'O':
 			switch el.Str {
 			case "b", "strong":
@@ -112,7 +112,7 @@ func (rpt *Report) writeHTML(lineHt float64, htmlStr string) {
 			//case "u":
 			//	setStyle(0, 0, 1)
 			case "br", "p", "div":
-				rpt.pdf.Ln(lineHt)
+				rpt.Pdf.Ln(lineHt)
 			}
 		case 'C':
 			switch el.Str {
@@ -160,7 +160,7 @@ func (rpt *Report) wrapTextLines(text string, width float64) (ret []string) {
 
 	fit := func(s string, step, n int, width float64) int {
 		for max := len(s); n > 0 && n <= max; {
-			w := rpt.pdf.GetTextWidth(s[:n])
+			w := rpt.Pdf.GetTextWidth(s[:n])
 			switch step {
 			case 1, 3: //       keep halving (or - 1) until n chars fit in width
 				if w <= width {
@@ -181,7 +181,7 @@ func (rpt *Report) wrapTextLines(text string, width float64) (ret []string) {
 	}
 	// split text into lines. then break lines based on text width
 	for _, line := range splitLines(text) {
-		for rpt.pdf.GetTextWidth(line) > width {
+		for rpt.Pdf.GetTextWidth(line) > width {
 			n := len(line) //    reduce, increase, then reduce n to get best fit
 			for i := 1; i <= 3; i++ {
 				n = fit(line, i, n, width)

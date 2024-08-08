@@ -1,6 +1,7 @@
 package report
 
 import (
+	"image"
 	"io"
 	"path"
 	"strings"
@@ -343,4 +344,13 @@ func (gen *genGoPDF) Save2Pdf() ([]byte, error) {
 // Save2PdfFile writes the PDF document to file
 func (gen *genGoPDF) Save2PdfFile(filename string) error {
 	return gen.pdf.WritePdf(filename)
+}
+
+func (gen *genGoPDF) LoadImage(img image.Image, x, y, h, w float64) error {
+	return gen.pdf.ImageFrom(img, x, y, &gopdf.Rect{H: h, W: w})
+}
+
+func (gen *genGoPDF) SetText(x, y float64, value string) error {
+	gen.pdf.SetXY(x, y)
+	return gen.pdf.Cell(nil, value)
 }

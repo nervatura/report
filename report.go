@@ -75,6 +75,7 @@ type Generator interface {
 	AddPage()
 	// AddImage draws a image
 	AddImage(image *Image, x, y float64, options IM)
+	LoadImage(img image.Image, x, y, h, w float64) error
 	// AddFont imports a font and makes it available
 	AddFont(familyStr, styleStr, fileStr string, rd io.Reader)
 	// GetFontSize returns the size of the current font in points.
@@ -109,6 +110,7 @@ type Generator interface {
 	SetY(y float64)
 	// SetXY defines the abscissa and ordinate of the current position.
 	SetXY(x, y float64)
+	SetText(x, y float64, value string) error
 	// Ln performs a line break.
 	Ln(h float64)
 	// Cell prints a rectangular cell with optional borders, background color and character string.
@@ -505,7 +507,7 @@ type Column struct {
 
 // Report is the principal structure for creating a single PDF document
 type Report struct {
-	pdf                                                 Generator
+	Pdf                                                 Generator
 	orientation, format, fontDir, xmlHeader, xmlDetails string
 	//header/footer elements: Row, VGap, HLine. Page elements: Row, VGap, HLine, HTML, Datagrid
 	header, details, footer []PageItem
@@ -599,16 +601,16 @@ func (rpt *Report) createHeaderAndFooter() {
 		}
 	}
 	createSection("header", rpt.header)
-	cx := rpt.pdf.GetX()
-	cy := rpt.pdf.GetY()
-	_, pageHeight := rpt.pdf.GetPageSize()
-	rpt.pdf.SetY(pageHeight - rpt.BottomMargin - rpt.footerHeight)
+	cx := rpt.Pdf.GetX()
+	cy := rpt.Pdf.GetY()
+	_, pageHeight := rpt.Pdf.GetPageSize()
+	rpt.Pdf.SetY(pageHeight - rpt.BottomMargin - rpt.footerHeight)
 	createSection("footer", rpt.footer)
-	rpt.pdf.SetXY(cx, cy)
+	rpt.Pdf.SetXY(cx, cy)
 }
 
 func (rpt *Report) checkPageBreak(nextHeight float64) bool {
-	cy := rpt.pdf.GetY()
+	cy := rpt.Pdf.GetY()
 	dLine := rpt.pageBreak
 	if cy < rpt.pageBreak-rpt.footerHeight {
 		dLine -= rpt.footerHeight
@@ -630,7 +632,7 @@ func (rpt *Report) getFooterHeight() (fHeight float64) {
 			fHeight += (1 + v.Gap)
 		}
 	}
-	_, pageHeight := rpt.pdf.GetPageSize()
+	_, pageHeight := rpt.Pdf.GetPageSize()
 	rpt.pageBreak = pageHeight - rpt.BottomMargin
 	return fHeight
 }
@@ -653,7 +655,7 @@ func (rpt *Report) setHTMLValue(value, fieldname string) string {
 func (rpt *Report) setValue(value string) string {
 	var getValue = func(valueGet string) string {
 		if matched, _ := regexp.MatchString("{{page}}", valueGet); matched {
-			valueGet = strings.ReplaceAll(valueGet, "{{page}}", strconv.Itoa(rpt.pdf.PageNo()))
+			valueGet = strings.ReplaceAll(valueGet, "{{page}}", strconv.Itoa(rpt.Pdf.PageNo()))
 		}
 		dbv := strings.Split(valueGet, ".")
 		storeData, isData := rpt.data[dbv[0]]
@@ -702,9 +704,9 @@ func (rpt *Report) getCellHeight(text string, width float64, options IM) float64
 	if text == "" {
 		text = "X"
 	}
-	rpt.pdf.SetFont(rpt.FontFamily, options["fontStyle"].(string), options["fontSize"].(float64))
+	rpt.Pdf.SetFont(rpt.FontFamily, options["fontStyle"].(string), options["fontSize"].(float64))
 	lines := rpt.wrapTextLines(text, width-_padding)
-	lineHt := rpt.pdf.GetFontSize()
+	lineHt := rpt.Pdf.GetFontSize()
 	return float64(len(lines)) * (lineHt + _padding)
 }
 
@@ -755,7 +757,7 @@ func (rpt *Report) createDatagrid(gridElement *Datagrid, virtual bool) bool {
 		"columns":      make([]IM, 0),
 		"columnsWidth": float64(0), "gridWidth": float64(0), "multiline": false, "virtual": virtual}
 
-	pageWidth, _ := rpt.pdf.GetPageSize()
+	pageWidth, _ := rpt.Pdf.GetPageSize()
 	nwidth := pageWidth - rpt.RightMargin - rpt.LeftMargin
 	gridElement.Width = ToString(gridElement.Width, "100%")
 	if strings.HasSuffix(gridElement.Width, "%") {
@@ -803,7 +805,7 @@ func (rpt *Report) createDatagrid(gridElement *Datagrid, virtual bool) bool {
 				if len(gridElement.Columns)-1 == index {
 					columnOptions["columnWidth"] = lnWidth
 				} else {
-					columnOptions["columnWidth"] = rpt.pdf.GetTextWidth(columnOptions["label"].(string)) + _padding
+					columnOptions["columnWidth"] = rpt.Pdf.GetTextWidth(columnOptions["label"].(string)) + _padding
 				}
 				zcol++
 			}
@@ -948,14 +950,14 @@ func (rpt *Report) createCell(options IM) float64 {
 		padding = 0
 	}
 
-	pageWidth, _ := rpt.pdf.GetPageSize()
-	lineHt := rpt.pdf.GetFontSize()
-	startY := rpt.pdf.GetY()
-	startX := rpt.pdf.GetX()
+	pageWidth, _ := rpt.Pdf.GetPageSize()
+	lineHt := rpt.Pdf.GetFontSize()
+	startY := rpt.Pdf.GetY()
+	startX := rpt.Pdf.GetX()
 
 	xCol := ToFloat(options["xCol"], startX)
 	if xCol != startX {
-		rpt.pdf.SetX(xCol)
+		rpt.Pdf.SetX(xCol)
 	}
 
 	width := ToFloat(options["columnWidth"], 0)
@@ -973,7 +975,7 @@ func (rpt *Report) createCell(options IM) float64 {
 			}
 		}
 		if width == 0 {
-			width = rpt.pdf.GetTextWidth(text) + padding
+			width = rpt.Pdf.GetTextWidth(text) + padding
 		}
 		if startX+padding+width > pageWidth-rpt.RightMargin {
 			width = 0
@@ -988,15 +990,15 @@ func (rpt *Report) createCell(options IM) float64 {
 		}
 		if !virtual {
 			//w, h, lineH, padding float64, txtStr, borderStr, alignStr string, fill bool
-			rpt.pdf.MultiCell(IM{
+			rpt.Pdf.MultiCell(IM{
 				"w": width, "h": height, "lineH": lineHt + padding, "padding": padding,
 				"txtStr": text, "borderStr": border, "alignStr": align, "fill": fill,
 			})
 		}
 		if ln {
-			rpt.pdf.SetY(startY + height)
+			rpt.Pdf.SetY(startY + height)
 		} else {
-			rpt.pdf.SetY(startY)
+			rpt.Pdf.SetY(startY)
 		}
 		return height
 	}
@@ -1005,13 +1007,13 @@ func (rpt *Report) createCell(options IM) float64 {
 		height = lineHt + padding
 	}
 	if !virtual {
-		rpt.pdf.Cell(IM{
+		rpt.Pdf.Cell(IM{
 			"w": width, "h": height, "padding": padding, "txtStr": text, "borderStr": border,
 			"alignStr": align, "fill": fill, "ln": ln,
 		})
 	}
-	if rpt.pdf.GetY()-startY > height {
-		return rpt.pdf.GetY() - startY
+	if rpt.Pdf.GetY()-startY > height {
+		return rpt.Pdf.GetY() - startY
 	}
 	return height
 }
@@ -1067,7 +1069,7 @@ func (rpt *Report) drawImage(v *Image) {
 	if rpt.checkPageBreak(v.Height) {
 		rpt.addPage()
 	}
-	rpt.pdf.AddImage(v, rpt.pdf.GetX(), rpt.pdf.GetY(), IM{"ImagePath": rpt.ImagePath})
+	rpt.Pdf.AddImage(v, rpt.Pdf.GetX(), rpt.Pdf.GetY(), IM{"ImagePath": rpt.ImagePath})
 }
 
 func (rpt *Report) createImage(v *Image, rowHeight float64, virtual bool) (float64, float64) {
@@ -1101,10 +1103,10 @@ func (rpt *Report) createImage(v *Image, rowHeight float64, virtual bool) (float
 }
 
 func (rpt *Report) createBarcode(v *Barcode, virtual, ln bool) (float64, float64) {
-	pageWidth, _ := rpt.pdf.GetPageSize()
-	rpt.pdf.SetTextColor(int(rpt.TextColor.R), int(rpt.TextColor.G), int(rpt.TextColor.B))
+	pageWidth, _ := rpt.Pdf.GetPageSize()
+	rpt.Pdf.SetTextColor(int(rpt.TextColor.R), int(rpt.TextColor.G), int(rpt.TextColor.B))
 	width := v.Width
-	strWidth := rpt.pdf.GetTextWidth(v.Value)
+	strWidth := rpt.Pdf.GetTextWidth(v.Value)
 	if width == 0 {
 		width = strWidth + 1.5*_padding
 	}
@@ -1112,9 +1114,9 @@ func (rpt *Report) createBarcode(v *Barcode, virtual, ln bool) (float64, float64
 	if height == 0 {
 		height = 10 * _mmPt
 	}
-	startX := rpt.pdf.GetX()
-	startY := rpt.pdf.GetY()
-	lineHt := rpt.pdf.GetFontSize()
+	startX := rpt.Pdf.GetX()
+	startY := rpt.Pdf.GetY()
+	lineHt := rpt.Pdf.GetFontSize()
 	if ln {
 		if v.Extend {
 			width = pageWidth - startX - rpt.RightMargin - _padding
@@ -1147,11 +1149,11 @@ func (rpt *Report) createBarcode(v *Barcode, virtual, ln bool) (float64, float64
 		buf := new(bytes.Buffer)
 		err := jpeg.Encode(buf, bcode, &jpeg.Options{Quality: 100})
 		if err == nil {
-			rpt.pdf.AddImage(&Image{Data: buf.Bytes(), Width: width, Height: height}, startX, startY, IM{})
+			rpt.Pdf.AddImage(&Image{Data: buf.Bytes(), Width: width, Height: height}, startX, startY, IM{})
 		}
 		if v.VisibleValue {
-			rpt.pdf.SetXY(startX+(width-strWidth)/2, startY+height+1.5*_padding)
-			rpt.pdf.Text(v.Value, rpt.pageBreak-rpt.footerHeight)
+			rpt.Pdf.SetXY(startX+(width-strWidth)/2, startY+height+1.5*_padding)
+			rpt.Pdf.Text(v.Value, rpt.pageBreak-rpt.footerHeight)
 			height += lineHt + 1.5*_padding
 		}
 	}
@@ -1179,11 +1181,11 @@ func (rpt *Report) addToXML(section string, values []string) {
 func (rpt *Report) createRow(section string, rowElement *Row, virtual bool) float64 {
 	maxHeight := rowElement.Height
 	for index := 0; index < len(rowElement.Columns); index++ {
-		startY := rpt.pdf.GetY()
-		if rpt.pdf.GetX() != rpt.LeftMargin {
-			rpt.pdf.SetX(rpt.pdf.GetX() + rowElement.HGap)
+		startY := rpt.Pdf.GetY()
+		if rpt.Pdf.GetX() != rpt.LeftMargin {
+			rpt.Pdf.SetX(rpt.Pdf.GetX() + rowElement.HGap)
 		}
-		startX := rpt.pdf.GetX()
+		startX := rpt.Pdf.GetX()
 		ln := len(rowElement.Columns)-1 == index
 		element := rowElement.Columns[index].Item
 		switch v := element.(type) {
@@ -1226,9 +1228,9 @@ func (rpt *Report) createRow(section string, rowElement *Row, virtual bool) floa
 					maxHeight = height
 				}
 				if len(rowElement.Columns)-1 == index {
-					rpt.pdf.SetXY(rpt.LeftMargin, startY+maxHeight)
+					rpt.Pdf.SetXY(rpt.LeftMargin, startY+maxHeight)
 				} else {
-					rpt.pdf.SetXY(startX+width, startY)
+					rpt.Pdf.SetXY(startX+width, startY)
 				}
 			}
 		case *Barcode:
@@ -1237,16 +1239,16 @@ func (rpt *Report) createRow(section string, rowElement *Row, virtual bool) floa
 				maxHeight = height
 			}
 			if len(rowElement.Columns)-1 == index {
-				rpt.pdf.SetXY(rpt.LeftMargin, startY+maxHeight)
+				rpt.Pdf.SetXY(rpt.LeftMargin, startY+maxHeight)
 			} else {
-				rpt.pdf.SetXY(startX+width+_padding, startY)
+				rpt.Pdf.SetXY(startX+width+_padding, startY)
 			}
 		case *Separator:
 			if !virtual {
-				rpt.pdf.Line(rpt.pdf.GetX()+v.Gap, rpt.pdf.GetY(), rpt.pdf.GetX()+v.Gap, rpt.pdf.GetY()+maxHeight)
+				rpt.Pdf.Line(rpt.Pdf.GetX()+v.Gap, rpt.Pdf.GetY(), rpt.Pdf.GetX()+v.Gap, rpt.Pdf.GetY()+maxHeight)
 			}
 			if len(rowElement.Columns)-1 == index {
-				rpt.pdf.SetX(rpt.pdf.GetX() + v.Gap)
+				rpt.Pdf.SetX(rpt.Pdf.GetX() + v.Gap)
 			}
 			if v.Gap > maxHeight || maxHeight == 0 {
 				maxHeight = v.Gap
@@ -1257,7 +1259,7 @@ func (rpt *Report) createRow(section string, rowElement *Row, virtual bool) floa
 }
 
 func (rpt *Report) createHTML(v *HTML) {
-	lineHt := rpt.pdf.GetFontSize()
+	lineHt := rpt.Pdf.GetFontSize()
 	htmlStr := v.Value
 	fieldname := ToString(v.Fieldname, "head")
 	options := IM{
@@ -1270,12 +1272,12 @@ func (rpt *Report) createHTML(v *HTML) {
 	htmlStr = rpt.setHTMLValue(htmlStr, fieldname)
 	rpt.setPageStyle(options)
 	rpt.writeHTML(lineHt, htmlStr)
-	rpt.pdf.SetXY(rpt.LeftMargin, rpt.pdf.GetY()+lineHt+_padding)
+	rpt.Pdf.SetXY(rpt.LeftMargin, rpt.Pdf.GetY()+lineHt+_padding)
 }
 
 func (rpt *Report) createLine(v *HLine, virtual bool) {
 	width := float64(0)
-	pageWidth, _ := rpt.pdf.GetPageSize()
+	pageWidth, _ := rpt.Pdf.GetPageSize()
 	if strings.HasSuffix(v.Width, "%") {
 		width = ToFloat(strings.Replace(v.Width, "%", "", -1), width) / 100
 		width = (pageWidth - rpt.LeftMargin - rpt.RightMargin) * width
@@ -1288,9 +1290,9 @@ func (rpt *Report) createLine(v *HLine, virtual bool) {
 	options := IM{"borderColor": v.BorderColor}
 	rpt.setPageStyle(options)
 	if !virtual {
-		rpt.pdf.Line(rpt.pdf.GetX(), rpt.pdf.GetY(), rpt.pdf.GetX()+width, rpt.pdf.GetY())
+		rpt.Pdf.Line(rpt.Pdf.GetX(), rpt.Pdf.GetY(), rpt.Pdf.GetX()+width, rpt.Pdf.GetY())
 		if v.Gap > 0 {
-			rpt.pdf.Line(rpt.pdf.GetX(), rpt.pdf.GetY()+v.Gap, rpt.pdf.GetX()+width, rpt.pdf.GetY()+v.Gap)
+			rpt.Pdf.Line(rpt.Pdf.GetX(), rpt.Pdf.GetY()+v.Gap, rpt.Pdf.GetX()+width, rpt.Pdf.GetY()+v.Gap)
 		}
 	}
 }
@@ -1313,7 +1315,7 @@ func (rpt *Report) createElement(section string, element interface{}) {
 		if rpt.checkPageBreak(v.Height) {
 			rpt.addPage()
 		}
-		rpt.pdf.Ln(v.Height)
+		rpt.Pdf.Ln(v.Height)
 	case *HLine:
 		rpt.createLine(v, false)
 	case *HTML:
@@ -1327,16 +1329,16 @@ func (rpt *Report) setPageStyle(options IM) {
 	//font-family, font-size, font-style, color,background-color,border-color
 	fontStyle := ToString(options["fontStyle"], "")
 	fontSize := ToFloat(options["fontSize"], rpt.FontSize)
-	rpt.pdf.SetFont(rpt.FontFamily, fontStyle, fontSize)
+	rpt.Pdf.SetFont(rpt.FontFamily, fontStyle, fontSize)
 
 	if textColor, textKey := options["textColor"]; textKey {
-		rpt.pdf.SetTextColor(int(textColor.(color.RGBA).R), int(textColor.(color.RGBA).G), int(textColor.(color.RGBA).B))
+		rpt.Pdf.SetTextColor(int(textColor.(color.RGBA).R), int(textColor.(color.RGBA).G), int(textColor.(color.RGBA).B))
 	}
 	if borderColor, borderKey := options["borderColor"]; borderKey {
-		rpt.pdf.SetDrawColor(int(borderColor.(color.RGBA).R), int(borderColor.(color.RGBA).G), int(borderColor.(color.RGBA).B))
+		rpt.Pdf.SetDrawColor(int(borderColor.(color.RGBA).R), int(borderColor.(color.RGBA).G), int(borderColor.(color.RGBA).B))
 	}
 	if backgroundColor, backgroundKey := options["backgroundColor"]; backgroundKey {
-		rpt.pdf.SetFillColor(int(backgroundColor.(color.RGBA).R), int(backgroundColor.(color.RGBA).G), int(backgroundColor.(color.RGBA).B))
+		rpt.Pdf.SetFillColor(int(backgroundColor.(color.RGBA).R), int(backgroundColor.(color.RGBA).G), int(backgroundColor.(color.RGBA).B))
 	}
 
 }
@@ -1482,27 +1484,27 @@ func (rpt *Report) setFont() bool {
 	}
 
 	if custom {
-		rpt.pdf.AddFont(rpt.FontFamily, "", path.Join(rpt.fontDir, fontFile["REGULAR"](rpt.FontFamily)), nil)
-		rpt.pdf.AddFont(rpt.FontFamily, "B", path.Join(rpt.fontDir, fontFile["BOLD"](rpt.FontFamily)), nil)
-		rpt.pdf.AddFont(rpt.FontFamily, "I", path.Join(rpt.fontDir, fontFile["ITALIC"](rpt.FontFamily)), nil)
-		rpt.pdf.AddFont(rpt.FontFamily, "BI", path.Join(rpt.fontDir, fontFile["BOLDITALIC"](rpt.FontFamily)), nil)
+		rpt.Pdf.AddFont(rpt.FontFamily, "", path.Join(rpt.fontDir, fontFile["REGULAR"](rpt.FontFamily)), nil)
+		rpt.Pdf.AddFont(rpt.FontFamily, "B", path.Join(rpt.fontDir, fontFile["BOLD"](rpt.FontFamily)), nil)
+		rpt.Pdf.AddFont(rpt.FontFamily, "I", path.Join(rpt.fontDir, fontFile["ITALIC"](rpt.FontFamily)), nil)
+		rpt.Pdf.AddFont(rpt.FontFamily, "BI", path.Join(rpt.fontDir, fontFile["BOLDITALIC"](rpt.FontFamily)), nil)
 	} else {
 		rpt.FontFamily = _fontFamily
 		font, _ := Fonts.Open(path.Join("fonts", fontFile["REGULAR"](_fontFamily)))
-		rpt.pdf.AddFont(rpt.FontFamily, "", "", font)
+		rpt.Pdf.AddFont(rpt.FontFamily, "", "", font)
 		font, _ = Fonts.Open(path.Join("fonts", fontFile["BOLD"](_fontFamily)))
-		rpt.pdf.AddFont(rpt.FontFamily, "B", "", font)
+		rpt.Pdf.AddFont(rpt.FontFamily, "B", "", font)
 		font, _ = Fonts.Open(path.Join("fonts", fontFile["ITALIC"](_fontFamily)))
-		rpt.pdf.AddFont(rpt.FontFamily, "I", "", font)
+		rpt.Pdf.AddFont(rpt.FontFamily, "I", "", font)
 		font, _ = Fonts.Open(path.Join("fonts", fontFile["BOLDITALIC"](_fontFamily)))
-		rpt.pdf.AddFont(rpt.FontFamily, "BI", "", font)
+		rpt.Pdf.AddFont(rpt.FontFamily, "BI", "", font)
 	}
 	return true
 }
 
 func (rpt *Report) addPage() {
-	rpt.pdf.AddPage()
-	rpt.pdf.SetXY(rpt.LeftMargin, rpt.TopMargin)
+	rpt.Pdf.AddPage()
+	rpt.Pdf.SetXY(rpt.LeftMargin, rpt.TopMargin)
 	rpt.createHeaderAndFooter()
 }
 
@@ -1556,8 +1558,8 @@ func New(options ...string) (rpt *Report) {
 	rpt.footer = make([]PageItem, 0)
 	rpt.data = make(IM)
 
-	rpt.pdf = generators[_generator]
-	rpt.pdf.Init(rpt)
+	rpt.Pdf = generators[_generator]
+	rpt.Pdf.Init(rpt)
 	rpt.setFont()
 
 	return
@@ -1565,7 +1567,7 @@ func New(options ...string) (rpt *Report) {
 
 // CreateReport - the report template processing, databind replacement.
 func (rpt *Report) CreateReport() bool {
-	rpt.pdf.SetProperties(rpt)
+	rpt.Pdf.SetProperties(rpt)
 	rpt.setPageStyle(make(IM))
 	rpt.footerHeight = rpt.getFooterHeight()
 	rpt.addPage()
@@ -1821,13 +1823,13 @@ func (rpt *Report) Save2DataURLString(filename string) (string, error) {
 
 // Save2Pdf creates a PDF output.
 func (rpt *Report) Save2Pdf() ([]byte, error) {
-	return rpt.pdf.Save2Pdf()
+	return rpt.Pdf.Save2Pdf()
 }
 
 // Save2PdfFile creates or truncates the file specified by fileStr and
 // writes the PDF document to it.
 func (rpt *Report) Save2PdfFile(filename string) error {
-	return rpt.pdf.Save2PdfFile(filename)
+	return rpt.Pdf.Save2PdfFile(filename)
 }
 
 // Save2Xml creates an XML output. Only the values of cells and datagrid

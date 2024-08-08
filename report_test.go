@@ -477,7 +477,7 @@ func TestPageItem_setPageItem(t *testing.T) {
 
 func TestReport_getPageItem(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -535,7 +535,7 @@ func TestReport_getPageItem(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -575,7 +575,7 @@ func TestReport_getPageItem(t *testing.T) {
 
 func TestReport_SetReportValue(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -717,7 +717,7 @@ func TestReport_SetReportValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -755,7 +755,7 @@ func TestReport_SetReportValue(t *testing.T) {
 
 func TestReport_setHTMLValue(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -816,7 +816,7 @@ func TestReport_setHTMLValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -854,7 +854,7 @@ func TestReport_setHTMLValue(t *testing.T) {
 
 func TestReport_setValue(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -983,7 +983,7 @@ func TestReport_setValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1021,7 +1021,7 @@ func TestReport_setValue(t *testing.T) {
 
 func TestReport_getCellHeight(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1065,7 +1065,7 @@ func TestReport_getCellHeight(t *testing.T) {
 		{
 			name: "empty",
 			fields: fields{
-				pdf:        rpt.pdf,
+				Pdf:        rpt.Pdf,
 				FontFamily: rpt.FontFamily,
 			},
 			args: args{
@@ -1081,7 +1081,7 @@ func TestReport_getCellHeight(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1119,7 +1119,7 @@ func TestReport_getCellHeight(t *testing.T) {
 
 func TestReport_createGridHeader(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1160,7 +1160,7 @@ func TestReport_createGridHeader(t *testing.T) {
 		{
 			name: "columnWidth_0",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			args: args{
 				headerOptions: IM{
@@ -1182,7 +1182,7 @@ func TestReport_createGridHeader(t *testing.T) {
 		{
 			name: "merge",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			args: args{
 				headerOptions: IM{
@@ -1206,7 +1206,7 @@ func TestReport_createGridHeader(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1242,7 +1242,7 @@ func TestReport_createGridHeader(t *testing.T) {
 
 func TestReport_createDatagrid(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1284,7 +1284,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "Columns_0",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			args: args{
 				gridElement: &Datagrid{
@@ -1296,7 +1296,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "Columns_0",
 			fields: fields{
-				pdf:  rpt.pdf,
+				Pdf:  rpt.Pdf,
 				data: make(map[string]interface{}),
 			},
 			args: args{
@@ -1313,7 +1313,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "Columns_gridWidth",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
 						{"id": ""},
@@ -1344,7 +1344,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "merge",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
 						{"id": ""},
@@ -1375,7 +1375,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "columnWidth",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
 						{"id": ""},
@@ -1405,7 +1405,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		{
 			name: "cols",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
 						{"id": ""},
@@ -1447,7 +1447,7 @@ func TestReport_createDatagrid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1485,7 +1485,7 @@ func TestReport_createDatagrid(t *testing.T) {
 
 func TestReport_setImageSize(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1526,7 +1526,7 @@ func TestReport_setImageSize(t *testing.T) {
 		{
 			name: "decode_ok",
 			fields: fields{
-				pdf:       rpt.pdf,
+				Pdf:       rpt.Pdf,
 				ImagePath: "../utils/static/client",
 			},
 			args: args{
@@ -1538,7 +1538,7 @@ func TestReport_setImageSize(t *testing.T) {
 		{
 			name: "decode_error",
 			fields: fields{
-				pdf:       rpt.pdf,
+				Pdf:       rpt.Pdf,
 				ImagePath: "",
 			},
 			args: args{
@@ -1551,7 +1551,7 @@ func TestReport_setImageSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1587,7 +1587,7 @@ func TestReport_setImageSize(t *testing.T) {
 
 func TestReport_addToXML(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1639,7 +1639,7 @@ func TestReport_addToXML(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1675,7 +1675,7 @@ func TestReport_addToXML(t *testing.T) {
 
 func TestReport_createRow(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1719,7 +1719,7 @@ func TestReport_createRow(t *testing.T) {
 		{
 			name: "Separator",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			args: args{
 				rowElement: &Row{
@@ -1740,7 +1740,7 @@ func TestReport_createRow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1778,7 +1778,7 @@ func TestReport_createRow(t *testing.T) {
 
 func TestReport_createLine(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1820,7 +1820,7 @@ func TestReport_createLine(t *testing.T) {
 		{
 			name: "pc_width",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			args: args{
 				v: &HLine{
@@ -1833,7 +1833,7 @@ func TestReport_createLine(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1869,7 +1869,7 @@ func TestReport_createLine(t *testing.T) {
 
 func TestReport_createElement(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -1911,7 +1911,7 @@ func TestReport_createElement(t *testing.T) {
 		{
 			name: "Row_Visible",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 				data: IM{
 					"ds": []SM{},
 				},
@@ -1927,7 +1927,7 @@ func TestReport_createElement(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -1963,7 +1963,7 @@ func TestReport_createElement(t *testing.T) {
 
 func TestReport_setFont(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -2001,14 +2001,14 @@ func TestReport_setFont(t *testing.T) {
 		{
 			name: "path_font",
 			fields: fields{
-				pdf: rpt.pdf,
+				Pdf: rpt.Pdf,
 			},
 			want: true,
 		},
 		{
 			name: "path_font_error",
 			fields: fields{
-				pdf:     rpt.pdf,
+				Pdf:     rpt.Pdf,
 				fontDir: "../../data",
 			},
 			want: true,
@@ -2017,7 +2017,7 @@ func TestReport_setFont(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -2055,7 +2055,7 @@ func TestReport_setFont(t *testing.T) {
 
 func TestReport_SetData(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -2129,7 +2129,7 @@ func TestReport_SetData(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -2172,7 +2172,7 @@ func TestReport_SetData(t *testing.T) {
 
 func TestReport_AppendElement(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -2284,7 +2284,7 @@ func TestReport_AppendElement(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -2324,7 +2324,7 @@ func TestReport_AppendElement(t *testing.T) {
 
 func TestReport_getJSONElements(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -2426,7 +2426,7 @@ func TestReport_getJSONElements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
@@ -2466,7 +2466,7 @@ func TestReport_getJSONElements(t *testing.T) {
 
 func TestReport_LoadJSONDefinition(t *testing.T) {
 	type fields struct {
-		pdf             Generator
+		Pdf             Generator
 		orientation     string
 		format          string
 		fontDir         string
@@ -2564,7 +2564,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rpt := &Report{
-				pdf:             tt.fields.pdf,
+				Pdf:             tt.fields.Pdf,
 				orientation:     tt.fields.orientation,
 				format:          tt.fields.format,
 				fontDir:         tt.fields.fontDir,
