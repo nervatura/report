@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	rp "github.com/nervatura/report"
+	rp "github.com/nervatura/report/v2"
 )
 
 func createGoReport() (rpt *rp.Report) {

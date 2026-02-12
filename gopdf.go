@@ -92,8 +92,10 @@ func (gen *genGoPDF) AddImage(image *Image, x, y float64, options IM) {
 	}
 	if image.Src != "" {
 		src := image.Src
-		if options["ImagePath"].(string) != "" {
-			src = path.Join(options["ImagePath"].(string), image.Src)
+		if options != nil {
+			if p, ok := options["ImagePath"].(string); ok && p != "" {
+				src = path.Join(p, image.Src)
+			}
 		}
 		_ = gen.pdf.Image(src, x, y, &gopdf.Rect{H: image.Height, W: image.Width})
 	}

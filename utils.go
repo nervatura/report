@@ -77,70 +77,89 @@ func ToFloat(value interface{}, defValue float64) float64 {
 
 // ToRGBA - safe RGBA conversion
 func ToRGBA(value interface{}, defValue color.RGBA) color.RGBA {
-	parseHexColor := func(v string) (out color.RGBA, err error) {
-		if len(v) != 7 {
-			return out, errors.New("hex color must be 7 characters")
-		}
-		red, redError := strconv.ParseUint(v[1:3], 16, 8)
-		if redError != nil {
-			return out, errors.New("red component invalid")
-		}
-		out.R = uint8(red)
-		green, greenError := strconv.ParseUint(v[3:5], 16, 8)
-		if greenError != nil {
-			return out, errors.New("green component invalid")
-		}
-		out.G = uint8(green)
-		blue, blueError := strconv.ParseUint(v[5:7], 16, 8)
-		if blueError != nil {
-			return out, errors.New("blue component invalid")
-		}
-		out.B = uint8(blue)
-		return
-	}
-
 	if rgbaValue, valid := value.(color.RGBA); valid {
 		return rgbaValue
 	}
-	if stringValue, valid := value.(string); valid {
-		if strings.HasPrefix(stringValue, "#") {
-			pvalue, err := parseHexColor(value.(string))
-			if err == nil {
-				return pvalue
-			}
-		} else {
-			ivalue := ToInteger(value, -1)
-			if ivalue > -1 && ivalue < 255 {
-				return color.RGBA{uint8(ivalue), uint8(ivalue), uint8(ivalue), 0}
-			}
-		}
+	if c := toRGBAFromString(value); c != nil {
+		return *c
 	}
-	if intValue, valid := value.(int); valid {
-		if intValue < 255 {
-			return color.RGBA{uint8(intValue), uint8(intValue), uint8(intValue), 0}
-		}
-	}
-	if int32Value, valid := value.(int32); valid {
-		if int32Value < 255 {
-			return color.RGBA{uint8(int32Value), uint8(int32Value), uint8(int32Value), 0}
-		}
-	}
-	if int64Value, valid := value.(int64); valid {
-		if int64Value < 255 {
-			return color.RGBA{uint8(int64Value), uint8(int64Value), uint8(int64Value), 0}
-		}
-	}
-	if float32Value, valid := value.(float32); valid {
-		if float32Value < 255 {
-			return color.RGBA{uint8(float32Value), uint8(float32Value), uint8(float32Value), 0}
-		}
-	}
-	if float64Value, valid := value.(float64); valid {
-		if float64Value < 255 {
-			return color.RGBA{uint8(float64Value), uint8(float64Value), uint8(float64Value), 0}
-		}
+	if c := toRGBAFromNumeric(value); c != nil {
+		return *c
 	}
 	return defValue
+}
+
+func parseHexColor(v string) (out color.RGBA, err error) {
+	if len(v) != 7 {
+		return out, errors.New("hex color must be 7 characters")
+	}
+	red, redError := strconv.ParseUint(v[1:3], 16, 8)
+	if redError != nil {
+		return out, errors.New("red component invalid")
+	}
+	out.R = uint8(red)
+	green, greenError := strconv.ParseUint(v[3:5], 16, 8)
+	if greenError != nil {
+		return out, errors.New("green component invalid")
+	}
+	out.G = uint8(green)
+	blue, blueError := strconv.ParseUint(v[5:7], 16, 8)
+	if blueError != nil {
+		return out, errors.New("blue component invalid")
+	}
+	out.B = uint8(blue)
+	return
+}
+
+func toRGBAFromString(value interface{}) *color.RGBA {
+	stringValue, valid := value.(string)
+	if !valid {
+		return nil
+	}
+	if strings.HasPrefix(stringValue, "#") {
+		pvalue, err := parseHexColor(stringValue)
+		if err == nil {
+			return &pvalue
+		}
+		return nil
+	}
+	ivalue := ToInteger(value, -1)
+	if ivalue >= 0 && ivalue < 255 {
+		c := color.RGBA{uint8(ivalue), uint8(ivalue), uint8(ivalue), 0}
+		return &c
+	}
+	return nil
+}
+
+func toRGBAFromNumeric(value interface{}) *color.RGBA {
+	v, ok := toUint8FromNumeric(value)
+	if !ok {
+		return nil
+	}
+	c := color.RGBA{v, v, v, 0}
+	return &c
+}
+
+func toUint8FromNumeric(value interface{}) (uint8, bool) {
+	var n float64
+	switch v := value.(type) {
+	case int:
+		n = float64(v)
+	case int32:
+		n = float64(v)
+	case int64:
+		n = float64(v)
+	case float32:
+		n = float64(v)
+	case float64:
+		n = v
+	default:
+		return 0, false
+	}
+	if n >= 0 && n < 255 {
+		return uint8(n), true
+	}
+	return 0, false
 }
 
 // ToInteger - safe int64 conversion

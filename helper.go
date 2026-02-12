@@ -133,78 +133,77 @@ func (rpt *Report) writeHTML(lineHt float64, htmlStr string) {
 // You can find out the number of lines needed to wrap some
 // text by checking the length of the returned array.
 func (rpt *Report) wrapTextLines(text string, width float64) (ret []string) {
-	// isWhiteSpace returns true if all the chars. in 's' are white-spaces
-	isWhiteSpace := func(s string) bool {
-		for _, r := range s {
-			if !unicode.IsSpace(r) {
-				return false
-			}
-		}
-		return len(s) > 0
-	}
-
-	// splitLines splits 's' into several lines using line breaks in 's'
-	splitLines := func(s string) []string {
-		split := func(lines []string, sep string) (ret []string) {
-			for _, line := range lines {
-				if strings.Contains(line, sep) {
-					ret = append(ret, strings.Split(line, sep)...)
-					continue
-				}
-				ret = append(ret, line)
-			}
-			return ret
-		}
-		return split(split(split([]string{s}, "\r\n"), "\r"), "\n")
-	} //
-
-	fit := func(s string, step, n int, width float64) int {
-		for max := len(s); n > 0 && n <= max; {
-			w := rpt.Pdf.GetTextWidth(s[:n])
-			switch step {
-			case 1, 3: //       keep halving (or - 1) until n chars fit in width
-				if w <= width {
-					return n
-				}
-				n--
-				if step == 1 {
-					n /= 2
-				}
-			case 2: //               increase n until n chars won't fit in width
-				if w > width {
-					return n
-				}
-				n = 1 + int((float64(n) * 1.1)) //    increase n by 1 + 20% of n
-			}
-		}
-		return 0
-	}
-	// split text into lines. then break lines based on text width
 	for _, line := range splitLines(text) {
-		for rpt.Pdf.GetTextWidth(line) > width {
-			n := len(line) //    reduce, increase, then reduce n to get best fit
-			for i := 1; i <= 3; i++ {
-				n = fit(line, i, n, width)
-			}
-			// move to the last word (if white-space is found)
-			found, max := false, n
-			for n > 0 {
-				if isWhiteSpace(line[n-1 : n]) {
-					found = true
-					break
-				}
-				n--
-			}
-			if !found {
-				n = max
-			}
-			if n <= 0 {
-				break
-			}
-			ret = append(ret, line[:n])
-			line = line[n:]
-		}
-		ret = append(ret, line)
+		ret = append(ret, rpt.wrapLine(line, width)...)
 	}
 	return ret
+}
+
+func splitLines(s string) []string {
+	split := func(lines []string, sep string) (ret []string) {
+		for _, line := range lines {
+			if strings.Contains(line, sep) {
+				ret = append(ret, strings.Split(line, sep)...)
+				continue
+			}
+			ret = append(ret, line)
+		}
+		return ret
+	}
+	return split(split(split([]string{s}, "\r\n"), "\r"), "\n")
+}
+
+func (rpt *Report) wrapLine(line string, width float64) []string {
+	var ret []string
+	for rpt.Pdf.GetTextWidth(line) > width {
+		n := rpt.fitLineWidth(line, width)
+		n = adjustedLineBreak(line, n)
+		if n <= 0 {
+			break
+		}
+		ret = append(ret, line[:n])
+		line = line[n:]
+	}
+	return append(ret, line)
+}
+
+func (rpt *Report) fitLineWidth(s string, width float64) int {
+	n := len(s)
+	for i := 1; i <= 3; i++ {
+		n = rpt.fitStep(s, i, n, width)
+	}
+	return n
+}
+
+func (rpt *Report) fitStep(s string, step, n int, width float64) int {
+	for max := len(s); n > 0 && n <= max; {
+		w := rpt.Pdf.GetTextWidth(s[:n])
+		switch step {
+		case 1, 3:
+			if w <= width {
+				return n
+			}
+			n--
+			if step == 1 {
+				n /= 2
+			}
+		case 2:
+			if w > width {
+				return n
+			}
+			n = 1 + int((float64(n) * 1.1))
+		}
+	}
+	return 0
+}
+
+func adjustedLineBreak(line string, n int) int {
+	max := n
+	for n > 0 && n <= len(line) {
+		if unicode.IsSpace(rune(line[n-1])) {
+			return n
+		}
+		n--
+	}
+	return max
 }

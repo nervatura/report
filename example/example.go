@@ -5,7 +5,7 @@ import (
 	"os"
 	"path"
 
-	rp "github.com/nervatura/report"
+	rp "github.com/nervatura/report/v2"
 )
 
 func main() {

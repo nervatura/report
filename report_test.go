@@ -1,11 +1,94 @@
 package report
 
 import (
+	"errors"
+	"image"
 	"image/color"
+	"io"
 	"os"
 	"path"
+	"strings"
 	"testing"
 )
+
+// mockGenerator implements Generator and returns saveErr from Save2Pdf.
+type mockGenerator struct {
+	saveErr error
+}
+
+func (m *mockGenerator) Init(rpt *Report)                                        {}
+func (m *mockGenerator) GetPageSize() (float64, float64)                         { return 0, 0 }
+func (m *mockGenerator) PageNo() int                                             { return 0 }
+func (m *mockGenerator) AddPage()                                                {}
+func (m *mockGenerator) AddImage(_ *Image, _, _ float64, _ IM)                    {}
+func (m *mockGenerator) LoadImage(_ image.Image, _, _, _, _ float64) error       { return nil }
+func (m *mockGenerator) AddFont(_, _, _ string, _ io.Reader)                     {}
+func (m *mockGenerator) GetFontSize() float64                                    { return 0 }
+func (m *mockGenerator) SetFont(_, _ string, _ float64)                          {}
+func (m *mockGenerator) SetFontSize(_ float64)                                   {}
+func (m *mockGenerator) GetTextWidth(_ string) float64                           { return 0 }
+func (m *mockGenerator) SetDrawColor(_, _, _ int)                                {}
+func (m *mockGenerator) SetFillColor(_, _, _ int)                                {}
+func (m *mockGenerator) SetTextColor(_, _, _ int)                                {}
+func (m *mockGenerator) SetProperties(_ *Report)                                 {}
+func (m *mockGenerator) Text(_ string, _ float64)                                {}
+func (m *mockGenerator) Rect(_, _, _, _ float64, _ string)                       {}
+func (m *mockGenerator) Line(_, _, _, _ float64)                                 {}
+func (m *mockGenerator) GetX() float64                                           { return 0 }
+func (m *mockGenerator) GetY() float64                                          { return 0 }
+func (m *mockGenerator) SetX(_ float64)                                         {}
+func (m *mockGenerator) SetY(_ float64)                                         {}
+func (m *mockGenerator) SetXY(_, _ float64)                                      {}
+func (m *mockGenerator) SetText(_, _ float64, _ string) error                    { return nil }
+func (m *mockGenerator) Ln(_ float64)                                            {}
+func (m *mockGenerator) Cell(_ IM)                                               {}
+func (m *mockGenerator) MultiCell(_ IM)                                          {}
+func (m *mockGenerator) Save2Pdf() ([]byte, error)                               { return nil, m.saveErr }
+func (m *mockGenerator) Save2PdfFile(_ string) error                             { return nil }
+
+// reportTestFields mirrors Report fields for table-driven tests.
+type reportTestFields struct {
+	Pdf             Generator
+	orientation     string
+	format          string
+	fontDir         string
+	xmlHeader       string
+	xmlDetails      string
+	header          []PageItem
+	details         []PageItem
+	footer          []PageItem
+	data            IM
+	footerHeight    float64
+	pageBreak       float64
+	Title           string
+	Author          string
+	Creator         string
+	Subject         string
+	Keywords        string
+	LeftMargin      float64
+	RightMargin     float64
+	TopMargin       float64
+	BottomMargin    float64
+	FontFamily      string
+	FontStyle       string
+	FontSize        float64
+	TextColor       color.RGBA
+	BorderColor     color.RGBA
+	BackgroundColor color.RGBA
+	ImagePath       string
+}
+
+func buildReportFromFields(f reportTestFields) *Report {
+	return &Report{
+		Pdf: f.Pdf, orientation: f.orientation, format: f.format, fontDir: f.fontDir,
+		xmlHeader: f.xmlHeader, xmlDetails: f.xmlDetails, header: f.header, details: f.details, footer: f.footer,
+		data: f.data, footerHeight: f.footerHeight, pageBreak: f.pageBreak,
+		Title: f.Title, Author: f.Author, Creator: f.Creator, Subject: f.Subject, Keywords: f.Keywords,
+		LeftMargin: f.LeftMargin, RightMargin: f.RightMargin, TopMargin: f.TopMargin, BottomMargin: f.BottomMargin,
+		FontFamily: f.FontFamily, FontStyle: f.FontStyle, FontSize: f.FontSize,
+		TextColor: f.TextColor, BorderColor: f.BorderColor, BackgroundColor: f.BackgroundColor, ImagePath: f.ImagePath,
+	}
+}
 
 func createGoReport(t *testing.T) (rpt *Report) {
 	var appendElement = func(parent interface{}, ename string, values IM) *[]PageItem {
@@ -208,6 +291,27 @@ func createGoReport(t *testing.T) (rpt *Report) {
 	return rpt
 }
 
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		options []string
+	}{
+		{"no_options", []string{}},
+		{"orientation_only", []string{"L"}},
+		{"orientation_and_format", []string{"P", "A4"}},
+		{"with_font", []string{"P", "A4", "Cabin"}},
+		{"with_fontDir", []string{"P", "A4", "Cabin", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rpt := New(tt.options...)
+			if rpt == nil {
+				t.Fatal("New() returned nil")
+			}
+		})
+	}
+}
+
 func TestCreateGoReport(t *testing.T) {
 	rpt := createGoReport(t)
 	if err := rpt.Save2PdfFile("example/out/go.pdf"); err != nil {
@@ -253,7 +357,34 @@ func TestBase64Report(t *testing.T) {
 	if err := os.WriteFile("example/out/base64.txt", []byte(base64Str), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
 
+func TestReport_Save2DataURLString(t *testing.T) {
+	rpt := createGoReport(t)
+	// With filename - covers filename != "" branch
+	dataURL, err := rpt.Save2DataURLString("test.pdf")
+	if err != nil {
+		t.Fatalf("Save2DataURLString() error = %v", err)
+	}
+	if !strings.Contains(dataURL, "filename=test.pdf") {
+		t.Errorf("Save2DataURLString() want filename in data URL, got %q", dataURL[:60])
+	}
+	// With empty filename - covers filename == "" branch
+	dataURLEmpty, err := rpt.Save2DataURLString("")
+	if err != nil {
+		t.Fatalf("Save2DataURLString() error = %v", err)
+	}
+	if strings.Contains(dataURLEmpty, "filename=") {
+		t.Errorf("Save2DataURLString() empty filename should not have filename=, got %q", dataURLEmpty[:60])
+	}
+	// Error path - covers lines 508-510 (Save2Pdf error)
+	rptErr := buildReportFromFields(reportTestFields{
+		Pdf: &mockGenerator{saveErr: errors.New("save error")},
+	})
+	_, err = rptErr.Save2DataURLString("x.pdf")
+	if err == nil {
+		t.Error("Save2DataURLString() want error when Save2Pdf fails")
+	}
 }
 
 func TestPageItem_setPageItem(t *testing.T) {
@@ -476,94 +607,21 @@ func TestPageItem_setPageItem(t *testing.T) {
 }
 
 func TestReport_getPageItem(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		etype string
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		wantErr bool
 	}{
-		{
-			name:   "separator",
-			fields: fields{},
-			args: args{
-				etype: "separator",
-			},
-			wantErr: false,
-		},
-		{
-			name:   "error",
-			fields: fields{},
-			args: args{
-				etype: "error",
-			},
-			wantErr: true,
-		},
+		{name: "separator", fields: reportTestFields{}, args: args{etype: "separator"}, wantErr: false},
+		{name: "error", fields: reportTestFields{}, args: args{etype: "error"}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			_, err := rpt.getPageItem(tt.args.etype)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Report.getPageItem() error = %v, wantErr %v", err, tt.wantErr)
@@ -574,49 +632,19 @@ func TestReport_getPageItem(t *testing.T) {
 }
 
 func TestReport_SetReportValue(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		fieldname string
 		value     interface{}
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		wantErr bool
 	}{
 		{
 			name:   "Author",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "Author",
 				value:     "",
@@ -625,7 +653,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "Creator",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "Creator",
 				value:     "",
@@ -634,7 +662,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "Subject",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "Subject",
 				value:     "",
@@ -643,7 +671,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "Keywords",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "Keywords",
 				value:     "",
@@ -652,7 +680,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "BottomMargin",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "BottomMargin",
 				value:     "",
@@ -661,7 +689,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "FontStyle",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "FontStyle",
 				value:     "",
@@ -670,7 +698,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "TextColor",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "TextColor",
 				value:     "",
@@ -679,7 +707,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "BorderColor",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "BorderColor",
 				value:     "",
@@ -688,7 +716,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "BackgroundColor",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "BackgroundColor",
 				value:     "",
@@ -697,7 +725,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "ImagePath",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "ImagePath",
 				value:     "",
@@ -706,7 +734,7 @@ func TestReport_SetReportValue(t *testing.T) {
 		},
 		{
 			name:   "error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "Error",
 				value:     "",
@@ -716,36 +744,7 @@ func TestReport_SetReportValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if err := rpt.SetReportValue(tt.args.fieldname, tt.args.value); (err != nil) != tt.wantErr {
 				t.Errorf("Report.SetReportValue() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -754,49 +753,19 @@ func TestReport_SetReportValue(t *testing.T) {
 }
 
 func TestReport_setHTMLValue(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		value     string
 		fieldname string
 	}
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 		want   string
 	}{
 		{
 			name:   "rek_value",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "html_text1",
 				value:     "<i>Lorem ipsum ... elit.</i> ={{html_text1}} <p>Nulla a <b><i>pretium</i></b> nunc, ={{html_text2}} in <u>cursus</u> quam.</p>",
@@ -805,7 +774,7 @@ func TestReport_setHTMLValue(t *testing.T) {
 		},
 		{
 			name:   "not_found",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				fieldname: "html_text",
 				value:     "<i>Lorem ipsum ... elit.</i>",
@@ -815,36 +784,7 @@ func TestReport_setHTMLValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.setHTMLValue(tt.args.value, tt.args.fieldname); got != tt.want {
 				t.Errorf("Report.setHTMLValue() = %v, want %v", got, tt.want)
 			}
@@ -853,48 +793,18 @@ func TestReport_setHTMLValue(t *testing.T) {
 }
 
 func TestReport_setValue(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		value string
 	}
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 		want   string
 	}{
 		{
 			name: "len_3",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": []map[string]string{
 						{
@@ -910,7 +820,7 @@ func TestReport_setValue(t *testing.T) {
 		},
 		{
 			name: "len_2",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": []map[string]string{
 						{
@@ -926,7 +836,7 @@ func TestReport_setValue(t *testing.T) {
 		},
 		{
 			name: "dict_0",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": map[string]string{},
 				},
@@ -938,7 +848,7 @@ func TestReport_setValue(t *testing.T) {
 		},
 		{
 			name: "dict_err",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": map[string]string{},
 				},
@@ -950,7 +860,7 @@ func TestReport_setValue(t *testing.T) {
 		},
 		{
 			name: "dict",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": map[string]string{
 						"value1": "value",
@@ -965,7 +875,7 @@ func TestReport_setValue(t *testing.T) {
 		},
 		{
 			name: "invalid_index",
-			fields: fields{
+			fields: reportTestFields{
 				data: map[string]interface{}{
 					"item": []map[string]string{
 						{
@@ -982,36 +892,7 @@ func TestReport_setValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.setValue(tt.args.value); got != tt.want {
 				t.Errorf("Report.setValue() = %v, want %v", got, tt.want)
 			}
@@ -1020,36 +901,6 @@ func TestReport_setValue(t *testing.T) {
 }
 
 func TestReport_getCellHeight(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		text    string
 		width   float64
@@ -1058,13 +909,13 @@ func TestReport_getCellHeight(t *testing.T) {
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 		want   float64
 	}{
 		{
 			name: "empty",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf:        rpt.Pdf,
 				FontFamily: rpt.FontFamily,
 			},
@@ -1080,36 +931,7 @@ func TestReport_getCellHeight(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.getCellHeight(tt.args.text, tt.args.width, tt.args.options); got != tt.want {
 				t.Errorf("Report.getCellHeight() = %v, want %v", got, tt.want)
 			}
@@ -1118,48 +940,18 @@ func TestReport_getCellHeight(t *testing.T) {
 }
 
 func TestReport_createGridHeader(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		headerOptions IM
 	}
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 	}{
 		{
 			name: "columnWidth_0",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			args: args{
@@ -1181,7 +973,7 @@ func TestReport_createGridHeader(t *testing.T) {
 		},
 		{
 			name: "merge",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			args: args{
@@ -1205,85 +997,26 @@ func TestReport_createGridHeader(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			rpt.createGridHeader(tt.args.headerOptions)
 		})
 	}
 }
 
 func TestReport_createDatagrid(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		gridElement *Datagrid
 	}
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 		want   bool
 	}{
 		{
 			name: "Columns_0",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			args: args{
@@ -1295,7 +1028,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		},
 		{
 			name: "Columns_0",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf:  rpt.Pdf,
 				data: make(map[string]interface{}),
 			},
@@ -1312,7 +1045,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		},
 		{
 			name: "Columns_gridWidth",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
@@ -1343,7 +1076,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		},
 		{
 			name: "merge",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
@@ -1374,7 +1107,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		},
 		{
 			name: "columnWidth",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
@@ -1404,7 +1137,7 @@ func TestReport_createDatagrid(t *testing.T) {
 		},
 		{
 			name: "cols",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 				data: IM{
 					"db": []SM{
@@ -1446,36 +1179,7 @@ func TestReport_createDatagrid(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.createDatagrid(tt.args.gridElement, true); got != tt.want {
 				t.Errorf("Report.createDatagrid() = %v, want %v", got, tt.want)
 			}
@@ -1484,48 +1188,18 @@ func TestReport_createDatagrid(t *testing.T) {
 }
 
 func TestReport_setImageSize(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		v *Image
 	}
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 	}{
 		{
 			name: "decode_ok",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf:       rpt.Pdf,
 				ImagePath: "../utils/static/client",
 			},
@@ -1537,7 +1211,7 @@ func TestReport_setImageSize(t *testing.T) {
 		},
 		{
 			name: "decode_error",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf:       rpt.Pdf,
 				ImagePath: "",
 			},
@@ -1550,84 +1224,25 @@ func TestReport_setImageSize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			rpt.setImageSize(tt.args.v)
 		})
 	}
 }
 
 func TestReport_addToXML(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		section string
 		values  []string
 	}
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 	}{
 		{
 			name: "header",
-			fields: fields{
+			fields: reportTestFields{
 				xmlHeader: "",
 			},
 			args: args{
@@ -1635,75 +1250,54 @@ func TestReport_addToXML(t *testing.T) {
 				values:  []string{"text", "value", "text"},
 			},
 		},
+		{
+			name: "details",
+			fields: reportTestFields{
+				xmlDetails: "",
+			},
+			args: args{
+				section: "details",
+				values:  []string{"field", "data", "field"},
+			},
+		},
+		{
+			name: "details_len1",
+			fields: reportTestFields{
+				xmlDetails: "",
+			},
+			args: args{
+				section: "details",
+				values:  []string{"node"},
+			},
+		},
+		{
+			name: "footer",
+			fields: reportTestFields{
+				xmlDetails: "",
+			},
+			args: args{
+				section: "footer",
+				values:  []string{"field", "data", "field"},
+			},
+		},
+		{
+			name: "label_skip",
+			fields: reportTestFields{},
+			args: args{
+				section: "header",
+				values:  []string{"label", "value", "label"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			rpt.addToXML(tt.args.section, tt.args.values)
 		})
 	}
 }
 
 func TestReport_createRow(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		section    string
 		rowElement *Row
@@ -1712,13 +1306,13 @@ func TestReport_createRow(t *testing.T) {
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 		want   float64
 	}{
 		{
 			name: "Separator",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			args: args{
@@ -1739,36 +1333,7 @@ func TestReport_createRow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.createRow(tt.args.section, tt.args.rowElement, tt.args.virtual); got != tt.want {
 				t.Errorf("Report.createRow() = %v, want %v", got, tt.want)
 			}
@@ -1777,36 +1342,6 @@ func TestReport_createRow(t *testing.T) {
 }
 
 func TestReport_createLine(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		v       *HLine
 		virtual bool
@@ -1814,12 +1349,12 @@ func TestReport_createLine(t *testing.T) {
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 	}{
 		{
 			name: "pc_width",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			args: args{
@@ -1832,72 +1367,13 @@ func TestReport_createLine(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			rpt.createLine(tt.args.v, true)
 		})
 	}
 }
 
 func TestReport_createElement(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		section string
 		element interface{}
@@ -1905,12 +1381,12 @@ func TestReport_createElement(t *testing.T) {
 	rpt := New("p", "A4")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		args   args
 	}{
 		{
-			name: "Row_Visible",
-			fields: fields{
+			name: "Row_Visible_empty",
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 				data: IM{
 					"ds": []SM{},
@@ -1923,129 +1399,184 @@ func TestReport_createElement(t *testing.T) {
 					Columns: make([]PageItem, 0)},
 			},
 		},
+		{
+			name: "Row_Visible_invalid_type",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+				data: IM{
+					"ds": "not_slice",
+				},
+			},
+			args: args{
+				section: "",
+				element: &Row{
+					Visible: "ds",
+					Columns: make([]PageItem, 0)},
+			},
+		},
+		{
+			name: "VGap_PageBreak",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+			},
+			args: args{
+				section: "details",
+				element: &VGap{Height: 5, PageBreak: true},
+			},
+		},
+		{
+			name: "VGap_checkPageBreak",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+			},
+			args: args{
+				section: "details",
+				element: &VGap{Height: 1000},
+			},
+		},
+		{
+			name: "HLine",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+			},
+			args: args{
+				section: "details",
+				element: &HLine{Width: "50%"},
+			},
+		},
+		{
+			name: "HTML",
+			fields: reportTestFields{
+				Pdf:  rpt.Pdf,
+				data: IM{"html_field": "<p>test</p>"},
+			},
+			args: args{
+				section: "details",
+				element: &HTML{Fieldname: "html_field", Value: "<p>test</p>"},
+			},
+		},
+		{
+			name: "Datagrid",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+				data: IM{
+					"items": []SM{{"a": "1"}},
+				},
+			},
+			args: args{
+				section: "details",
+				element: &Datagrid{
+					Databind: "items",
+					Columns: []PageItem{
+						{ItemType: "column", Item: &Column{Fieldname: "a", Label: "A"}},
+					},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			rpt.createElement(tt.args.section, tt.args.element)
 		})
 	}
 }
 
 func TestReport_setFont(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	rpt := New("p", "A4", "Roboto", "../../data/fonts")
 	tests := []struct {
 		name   string
-		fields fields
+		fields reportTestFields
 		want   bool
 	}{
 		{
 			name: "path_font",
-			fields: fields{
+			fields: reportTestFields{
 				Pdf: rpt.Pdf,
 			},
 			want: true,
 		},
 		{
 			name: "path_font_error",
-			fields: fields{
-				Pdf:     rpt.Pdf,
-				fontDir: "../../data",
+			fields: reportTestFields{
+				Pdf:        rpt.Pdf,
+				FontFamily: "Roboto",
+				fontDir:    "/tmp/nonexistent_fonts_12345",
 			},
+			want: true,
+		},
+		{
+			name: "path_font_partial",
+			fields: func() reportTestFields {
+				tmpDir := t.TempDir()
+				// Only Regular exists; BOLD/ITALIC/BOLDITALIC missing -> covers lines 84-86
+				regularData, _ := Fonts.ReadFile("fonts/Cabin-Regular.ttf")
+				_ = os.WriteFile(path.Join(tmpDir, "PartialFont-Regular.ttf"), regularData, 0644)
+				return reportTestFields{
+					Pdf:        rpt.Pdf,
+					FontFamily: "PartialFont",
+					fontDir:    tmpDir,
+				}
+			}(),
+			want: true,
+		},
+		{
+			name: "path_font_partial2",
+			fields: func() reportTestFields {
+				tmpDir := t.TempDir()
+				// Regular and Bold exist; ITALIC/BOLDITALIC missing -> covers lines 87-89
+				regularData, _ := Fonts.ReadFile("fonts/Cabin-Regular.ttf")
+				boldData, _ := Fonts.ReadFile("fonts/Cabin-Bold.ttf")
+				_ = os.WriteFile(path.Join(tmpDir, "Partial2-Regular.ttf"), regularData, 0644)
+				_ = os.WriteFile(path.Join(tmpDir, "Partial2-Bold.ttf"), boldData, 0644)
+				return reportTestFields{
+					Pdf:        rpt.Pdf,
+					FontFamily: "Partial2",
+					fontDir:    tmpDir,
+				}
+			}(),
+			want: true,
+		},
+		{
+			name: "path_font_partial3",
+			fields: func() reportTestFields {
+				tmpDir := t.TempDir()
+				// Regular, Bold, Italic exist; BOLDITALIC missing -> covers lines 90-92
+				regularData, _ := Fonts.ReadFile("fonts/Cabin-Regular.ttf")
+				boldData, _ := Fonts.ReadFile("fonts/Cabin-Bold.ttf")
+				italicData, _ := Fonts.ReadFile("fonts/Cabin-Italic.ttf")
+				_ = os.WriteFile(path.Join(tmpDir, "Partial3-Regular.ttf"), regularData, 0644)
+				_ = os.WriteFile(path.Join(tmpDir, "Partial3-Bold.ttf"), boldData, 0644)
+				_ = os.WriteFile(path.Join(tmpDir, "Partial3-Italic.ttf"), italicData, 0644)
+				return reportTestFields{
+					Pdf:        rpt.Pdf,
+					FontFamily: "Partial3",
+					fontDir:    tmpDir,
+				}
+			}(),
+			want: true,
+		},
+		{
+			name: "path_font_all",
+			fields: func() reportTestFields {
+				tmpDir := t.TempDir()
+				// All 4 fonts exist -> covers line 93 (return true) and custom branch 101-105
+				for _, name := range []string{"Regular", "Bold", "Italic", "BoldItalic"} {
+					data, _ := Fonts.ReadFile("fonts/Cabin-" + name + ".ttf")
+					_ = os.WriteFile(path.Join(tmpDir, "FullFont-"+name+".ttf"), data, 0644)
+				}
+				return reportTestFields{
+					Pdf:        rpt.Pdf,
+					FontFamily: "FullFont",
+					fontDir:    tmpDir,
+				}
+			}(),
 			want: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if got := rpt.setFont(); got != tt.want {
 				t.Errorf("Report.setFont() = %v, want %v", got, tt.want)
 			}
@@ -2054,50 +1585,20 @@ func TestReport_setFont(t *testing.T) {
 }
 
 func TestReport_SetData(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		key   string
 		value interface{}
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		want    bool
 		wantErr bool
 	}{
 		{
 			name: "SM",
-			fields: fields{
+			fields: reportTestFields{
 				data: IM{
 					"ds": SM{},
 				},
@@ -2113,7 +1614,7 @@ func TestReport_SetData(t *testing.T) {
 		},
 		{
 			name: "error",
-			fields: fields{
+			fields: reportTestFields{
 				data: IM{
 					"ds": SM{},
 				},
@@ -2128,36 +1629,7 @@ func TestReport_SetData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			got, err := rpt.SetData(tt.args.key, tt.args.value)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Report.SetData() error = %v, wantErr %v", err, tt.wantErr)
@@ -2171,48 +1643,18 @@ func TestReport_SetData(t *testing.T) {
 }
 
 func TestReport_AppendElement(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		options []interface{}
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		wantErr bool
 	}{
 		{
 			name:   "header_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					"header", "ename",
@@ -2222,7 +1664,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "details_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					"details", "ename",
@@ -2232,7 +1674,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "footer_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					"footer", "ename",
@@ -2242,7 +1684,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "pitem_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					&[]PageItem{}, "ename",
@@ -2252,7 +1694,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "type_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					int64(0), "ename",
@@ -2262,7 +1704,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "params_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					"footer", "row", int64(0),
@@ -2272,7 +1714,7 @@ func TestReport_AppendElement(t *testing.T) {
 		},
 		{
 			name:   "setPageItem_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				options: []interface{}{
 					"footer", "row", IM{"field": "value"},
@@ -2280,38 +1722,52 @@ func TestReport_AppendElement(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:   "no_options",
+			fields: reportTestFields{},
+			args: args{
+				options: []interface{}{},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "pitem_only",
+			fields: reportTestFields{},
+			args: args{
+				options: []interface{}{&[]PageItem{}},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "unknown_section",
+			fields: reportTestFields{},
+			args: args{
+				options: []interface{}{"body", "row"},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "default_section",
+			fields: reportTestFields{},
+			args: args{
+				options: []interface{}{"xyz", "row"},
+			},
+			wantErr: false,
+		},
+		{
+			name:   "body_invalid_element",
+			fields: reportTestFields{},
+			args: args{
+				options: []interface{}{"body", "invalid"},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
+			rpt := buildReportFromFields(tt.fields)
+			if rpt.Pdf == nil {
+				rpt = New("p", "A4")
 			}
 			_, err := rpt.AppendElement(tt.args.options...)
 			if (err != nil) != tt.wantErr {
@@ -2323,48 +1779,18 @@ func TestReport_AppendElement(t *testing.T) {
 }
 
 func TestReport_getJSONElements(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		edata interface{}
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		wantErr bool
 	}{
 		{
 			name:   "invalid_element",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				edata: IM{
 					"invalid": IM{},
@@ -2374,7 +1800,7 @@ func TestReport_getJSONElements(t *testing.T) {
 		},
 		{
 			name:   "columns_setPageItem_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				edata: IM{
 					"column": IM{
@@ -2392,7 +1818,7 @@ func TestReport_getJSONElements(t *testing.T) {
 		},
 		{
 			name:   "columns_invalid_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				edata: IM{
 					"column": IM{
@@ -2408,7 +1834,7 @@ func TestReport_getJSONElements(t *testing.T) {
 		},
 		{
 			name:   "setPageItem_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				edata: IM{
 					"column": IM{
@@ -2425,36 +1851,7 @@ func TestReport_getJSONElements(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			_, err := rpt.getJSONElements(tt.args.edata)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Report.getJSONElements() error = %v, wantErr %v", err, tt.wantErr)
@@ -2465,48 +1862,18 @@ func TestReport_getJSONElements(t *testing.T) {
 }
 
 func TestReport_LoadJSONDefinition(t *testing.T) {
-	type fields struct {
-		Pdf             Generator
-		orientation     string
-		format          string
-		fontDir         string
-		xmlHeader       string
-		xmlDetails      string
-		header          []PageItem
-		details         []PageItem
-		footer          []PageItem
-		data            IM
-		footerHeight    float64
-		pageBreak       float64
-		Title           string
-		Author          string
-		Creator         string
-		Subject         string
-		Keywords        string
-		LeftMargin      float64
-		RightMargin     float64
-		TopMargin       float64
-		BottomMargin    float64
-		FontFamily      string
-		FontStyle       string
-		FontSize        float64
-		TextColor       color.RGBA
-		BorderColor     color.RGBA
-		BackgroundColor color.RGBA
-		ImagePath       string
-	}
 	type args struct {
 		jsonString string
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  reportTestFields
 		args    args
 		wantErr bool
 	}{
 		{
 			name:   "missing_JSON",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: "",
 			},
@@ -2514,7 +1881,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "convert_JSON_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: "[{''",
 			},
@@ -2522,7 +1889,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "report_SetReportValue_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: `{"report":{"field":"value"}}`,
 			},
@@ -2530,7 +1897,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "header_SetReportValue_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: `{"header":[{"field":"value"}]}`,
 			},
@@ -2538,7 +1905,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "details_SetReportValue_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: `{"details":[{"field":"value"}]}`,
 			},
@@ -2546,7 +1913,7 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "footer_SetReportValue_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: `{"footer":[{"field":"value"}]}`,
 			},
@@ -2554,45 +1921,36 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 		},
 		{
 			name:   "data_type_error",
-			fields: fields{},
+			fields: reportTestFields{},
 			args: args{
 				jsonString: `{"data":{"field":true}}`,
 			},
 			wantErr: true,
 		},
+		{
+			name: "data_string_value",
+			fields: reportTestFields{
+				data: make(IM),
+			},
+			args: args{
+				jsonString: `{"data":{"str_key":"str_value"}}`,
+			},
+			wantErr: false,
+		},
+		{
+			name: "no_data_key",
+			fields: reportTestFields{
+				data: make(IM),
+			},
+			args: args{
+				jsonString: `{"header":[],"details":[],"footer":[]}`,
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rpt := &Report{
-				Pdf:             tt.fields.Pdf,
-				orientation:     tt.fields.orientation,
-				format:          tt.fields.format,
-				fontDir:         tt.fields.fontDir,
-				xmlHeader:       tt.fields.xmlHeader,
-				xmlDetails:      tt.fields.xmlDetails,
-				header:          tt.fields.header,
-				details:         tt.fields.details,
-				footer:          tt.fields.footer,
-				data:            tt.fields.data,
-				footerHeight:    tt.fields.footerHeight,
-				pageBreak:       tt.fields.pageBreak,
-				Title:           tt.fields.Title,
-				Author:          tt.fields.Author,
-				Creator:         tt.fields.Creator,
-				Subject:         tt.fields.Subject,
-				Keywords:        tt.fields.Keywords,
-				LeftMargin:      tt.fields.LeftMargin,
-				RightMargin:     tt.fields.RightMargin,
-				TopMargin:       tt.fields.TopMargin,
-				BottomMargin:    tt.fields.BottomMargin,
-				FontFamily:      tt.fields.FontFamily,
-				FontStyle:       tt.fields.FontStyle,
-				FontSize:        tt.fields.FontSize,
-				TextColor:       tt.fields.TextColor,
-				BorderColor:     tt.fields.BorderColor,
-				BackgroundColor: tt.fields.BackgroundColor,
-				ImagePath:       tt.fields.ImagePath,
-			}
+			rpt := buildReportFromFields(tt.fields)
 			if err := rpt.LoadJSONDefinition(tt.args.jsonString); (err != nil) != tt.wantErr {
 				t.Errorf("Report.LoadJSONDefinition() error = %v, wantErr %v", err, tt.wantErr)
 			}
