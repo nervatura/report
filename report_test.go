@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mockGenerator implements Generator and returns saveErr from Save2Pdf.
@@ -994,6 +995,29 @@ func TestReport_createGridHeader(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "extend_ln",
+			fields: reportTestFields{
+				Pdf: rpt.Pdf,
+			},
+			args: args{
+				headerOptions: IM{
+					"merge":        false,
+					"gridWidth":    float64(200),
+					"columnsWidth": float64(0),
+					"virtual":      true,
+					"extend":       true,
+					"columns": []IM{
+						{
+							"label":       "Last",
+							"ln":          true,
+							"columnWidth": 0,
+							"headerAlign": "L",
+						},
+					},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1955,5 +1979,323 @@ func TestReport_LoadJSONDefinition(t *testing.T) {
 				t.Errorf("Report.LoadJSONDefinition() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestRenderers covers rowRenderer, datagridRenderer, lineRenderer, htmlRenderer (100% coverage).
+func TestRenderers(t *testing.T) {
+	rpt := buildReportFromFields(reportTestFields{Pdf: &mockGenerator{}})
+	rpt.setFont()
+
+	t.Run("rowRenderer", func(t *testing.T) {
+		row := &Row{Columns: []PageItem{{ItemType: "cell", Item: &Cell{Value: "x"}}}}
+		var rr rowRenderer
+		h, err := rr.Render(rpt, row, "details", false)
+		if err != nil {
+			t.Fatalf("rowRenderer.Render() err = %v", err)
+		}
+		if h < 0 {
+			t.Errorf("rowRenderer.Render() height = %v", h)
+		}
+	})
+
+	t.Run("datagridRenderer", func(t *testing.T) {
+		dg := &Datagrid{Name: "g", Databind: "items", Columns: []PageItem{}}
+		rpt.data = IM{"items": []SM{{"a": "1"}}}
+		var dr datagridRenderer
+		_, err := dr.Render(rpt, dg, "details", false)
+		if err != nil {
+			t.Fatalf("datagridRenderer.Render() err = %v", err)
+		}
+	})
+
+	t.Run("lineRenderer", func(t *testing.T) {
+		hl := &HLine{}
+		var lr lineRenderer
+		_, err := lr.Render(rpt, hl, "details", false)
+		if err != nil {
+			t.Fatalf("lineRenderer.Render() err = %v", err)
+		}
+	})
+
+	t.Run("htmlRenderer", func(t *testing.T) {
+		html := &HTML{Fieldname: "x", Value: "<b>test</b>"}
+		var hr htmlRenderer
+		_, err := hr.Render(rpt, html, "details", false)
+		if err != nil {
+			t.Fatalf("htmlRenderer.Render() err = %v", err)
+		}
+	})
+	// datagridRenderer when createDatagrid returns false (no data)
+	t.Run("datagridRenderer_noData", func(t *testing.T) {
+		dg := &Datagrid{Name: "g", Databind: "missing", Columns: []PageItem{{ItemType: "column", Item: &Column{Fieldname: "x", Label: "X"}}}}
+		rpt.data = IM{}
+		var dr datagridRenderer
+		_, _ = dr.Render(rpt, dg, "details", false)
+	})
+	// HTML with attributes (basicTokenize attrRe)
+	t.Run("htmlRenderer_withAttrs", func(t *testing.T) {
+		html := &HTML{Fieldname: "x", Value: `<span class="foo">text</span>`}
+		var hr htmlRenderer
+		_, _ = hr.Render(rpt, html, "details", false)
+	})
+}
+
+// TestGenGoPDF_uncovered covers SetFontSize, Rect, LoadImage, SetText, AddImage branches.
+func TestGenGoPDF_uncovered(t *testing.T) {
+	rpt := createGoReport(t)
+	gen, ok := rpt.Pdf.(*genGoPDF)
+	if !ok {
+		t.Skip("Pdf is not genGoPDF (e.g. mock)")
+	}
+
+	gen.SetFontSize(12)
+	gen.Rect(10, 10, 50, 20, "F")
+
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	if err := gen.LoadImage(img, 0, 0, 10, 10); err != nil {
+		t.Errorf("LoadImage() err = %v", err)
+	}
+	if err := gen.SetText(10, 10, "test"); err != nil {
+		t.Errorf("SetText() err = %v", err)
+	}
+
+	// AddImage: invalid Data (err branch), and Src with ImagePath
+	gen.AddImage(&Image{Data: []byte("invalid")}, 0, 0, nil)
+	gen.AddImage(&Image{Src: "logo.png"}, 0, 0, IM{"ImagePath": "/tmp"})
+}
+
+func TestConvertToByte(t *testing.T) {
+	data := map[string]string{"a": "b"}
+	b, err := ConvertToByte(data)
+	if err != nil {
+		t.Fatalf("ConvertToByte() err = %v", err)
+	}
+	if len(b) == 0 {
+		t.Error("ConvertToByte() returned empty")
+	}
+}
+
+// TestUtils_fullCoverage covers all ToString, ToFloat, ToInteger, ToBoolean, ToRGBA branches.
+func TestUtils_fullCoverage(t *testing.T) {
+	// ToString branches
+	if got := ToString("", "def"); got != "def" {
+		t.Errorf("ToString empty string = %q", got)
+	}
+	if got := ToString(int32(42), ""); got != "42" {
+		t.Errorf("ToString int32 = %q", got)
+	}
+	if got := ToString(float32(3.14), ""); got == "" || !strings.Contains(got, "3") {
+		t.Errorf("ToString float32 = %q", got)
+	}
+	if got := ToString(time.Now(), ""); got == "" {
+		t.Error("ToString time.Time empty")
+	}
+	// ToFloat branches
+	if got := ToFloat(float64(0), 99); got != 99 {
+		t.Errorf("ToFloat 0 = %v", got)
+	}
+	if got := ToFloat(true, 0); got != 1 {
+		t.Errorf("ToFloat bool true = %v", got)
+	}
+	if got := ToFloat("3.14", 0); got != 3.14 {
+		t.Errorf("ToFloat string = %v", got)
+	}
+	// ToInteger branches
+	if got := ToInteger(int64(0), 99); got != 99 {
+		t.Errorf("ToInteger 0 = %v", got)
+	}
+	if got := ToInteger(true, 0); got != 1 {
+		t.Errorf("ToInteger bool = %v", got)
+	}
+	if got := ToInteger("42", 0); got != 42 {
+		t.Errorf("ToInteger string = %v", got)
+	}
+	// ToBoolean branches
+	if got := ToBoolean(int(1), false); !got {
+		t.Error("ToBoolean int 1")
+	}
+	if got := ToBoolean(int32(1), false); !got {
+		t.Error("ToBoolean int32 1")
+	}
+	if got := ToBoolean(int64(1), false); !got {
+		t.Error("ToBoolean int64 1")
+	}
+	if got := ToBoolean(float32(1), false); !got {
+		t.Error("ToBoolean float32 1")
+	}
+	if got := ToBoolean(float64(1), false); !got {
+		t.Error("ToBoolean float64 1")
+	}
+	if got := ToBoolean("true", false); !got {
+		t.Error("ToBoolean string true")
+	}
+	// ToRGBA / parseHexColor / toRGBAFromString / toUint8FromNumeric
+	c := ToRGBA("#ff0000", color.RGBA{})
+	if c.R != 255 || c.G != 0 || c.B != 0 {
+		t.Errorf("ToRGBA hex = %v", c)
+	}
+	c = ToRGBA("128", color.RGBA{})
+	if c.R != 128 {
+		t.Errorf("ToRGBA numeric string = %v", c)
+	}
+	c = ToRGBA(200, color.RGBA{})
+	if c.R != 200 {
+		t.Errorf("ToRGBA numeric = %v", c)
+	}
+	// parseHexColor error paths
+	if _, err := parseHexColor("short"); err == nil {
+		t.Error("parseHexColor short want err")
+	}
+	if _, err := parseHexColor("#gg0000"); err == nil {
+		t.Error("parseHexColor invalid red want err")
+	}
+	if _, err := parseHexColor("#00gg00"); err == nil {
+		t.Error("parseHexColor invalid green want err")
+	}
+	if _, err := parseHexColor("#0000gg"); err == nil {
+		t.Error("parseHexColor invalid blue want err")
+	}
+	// toUint8FromNumeric via ToRGBA - n >= 255 and n < 0
+	_ = ToRGBA(256, color.RGBA{})
+	_ = ToRGBA(-1, color.RGBA{})
+	// toRGBAFromString with non-# prefix numeric string
+	_ = ToRGBA("300", color.RGBA{})
+	// toUint8FromNumeric all types
+	_ = ToRGBA(int(100), color.RGBA{})
+	_ = ToRGBA(int32(100), color.RGBA{})
+	_ = ToRGBA(int64(100), color.RGBA{})
+	_ = ToRGBA(float32(100), color.RGBA{})
+}
+
+// TestSetImageSize covers setImageSize success path (valid image file).
+func TestSetImageSize(t *testing.T) {
+	// Create a minimal valid PNG
+	tmp := t.TempDir()
+	pngPath := path.Join(tmp, "test.png")
+	// 1x1 PNG
+	pngData := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xff, 0xff, 0x3f,
+		0x00, 0x05, 0xfe, 0x02, 0xfe, 0xdc, 0xcc, 0x59,
+		0xe7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	if err := os.WriteFile(pngPath, pngData, 0644); err != nil {
+		t.Fatal(err)
+	}
+	rpt := New("P", "A4")
+	rpt.Pdf = &mockGenerator{}
+	rpt.setFont()
+	rpt.ImagePath = tmp
+	img := &Image{Src: "test.png"}
+	rpt.setImageSize(img)
+	if img.MaxWidth == 0 || img.MaxHeight == 0 {
+		t.Errorf("setImageSize should set dimensions, got %vx%v", img.MaxWidth, img.MaxHeight)
+	}
+	// err path - non-existent file
+	img2 := &Image{Src: "nonexistent.png"}
+	rpt.setImageSize(img2)
+	if img2.Src != "" {
+		t.Errorf("setImageSize on missing file should clear Src, got %q", img2.Src)
+	}
+
+	// createImage with Src file path (covers setImageSize from createImage)
+	rpt2 := New("P", "A4")
+	rpt2.ImagePath = tmp
+	img3 := &Image{Src: "test.png"}
+	_, _ = rpt2.createImage(img3, 10, false)
+	if img3.MaxWidth == 0 {
+		t.Error("createImage with file Src should set dimensions")
+	}
+}
+
+// TestCreateRow_imageFromFile covers createRowImage with image from file.
+func TestCreateRow_imageFromFile(t *testing.T) {
+	tmp := t.TempDir()
+	pngData := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xff, 0xff, 0x3f,
+		0x00, 0x05, 0xfe, 0x02, 0xfe, 0xdc, 0xcc, 0x59,
+		0xe7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	os.WriteFile(path.Join(tmp, "logo.png"), pngData, 0644)
+	rpt := New("P", "A4")
+	rpt.ImagePath = tmp
+	rpt.footerHeight = 0
+	rpt.addPage()
+	row := &Row{
+		Columns: []PageItem{
+			{ItemType: "image", Item: &Image{Src: "logo.png", Height: 5}},
+			{ItemType: "cell", Item: &Cell{Value: "x"}},
+		},
+	}
+	rpt.createRow("details", row, false)
+}
+
+// TestEncodeImage_coversBranches covers encodeImage err path and non-jpeg/png format.
+func TestEncodeImage_coversBranches(t *testing.T) {
+	rpt := New("P", "A4")
+	rpt.Pdf = &mockGenerator{}
+	rpt.setFont()
+	// Invalid base64 - err path
+	img := &Image{}
+	rpt.encodeImage("data:image/png;base64,!!!invalid!!!", img)
+	if img.Data != nil {
+		t.Error("encodeImage invalid base64 should not set Data")
+	}
+	// GIF format (not jpeg/png) - no v.Data set
+	img2 := &Image{}
+	gifB64 := "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+	rpt.encodeImage(gifB64, img2)
+	if img2.Data != nil {
+		t.Error("encodeImage gif format should not set Data (unsupported)")
+	}
+}
+
+// TestSplitLines covers splitLines with \r\n, \r, \n.
+func TestSplitLines(t *testing.T) {
+	lines := splitLines("a\r\nb\rc\nd")
+	if len(lines) != 4 {
+		t.Errorf("splitLines = %v, want 4 parts", lines)
+	}
+}
+
+// TestCreateRow_separatorLast covers createRowSeparator when separator is last column.
+func TestCreateRow_separatorLast(t *testing.T) {
+	rpt := New("P", "A4")
+	rpt.footerHeight = 0
+	rpt.addPage()
+	row := &Row{
+		Columns: []PageItem{
+			{ItemType: "cell", Item: &Cell{Value: "a"}},
+			{ItemType: "separator", Item: &Separator{Gap: 5}},
+		},
+	}
+	rpt.createRow("details", row, false)
+}
+
+// TestCreateRow_unknownElement covers createRowElement default case.
+func TestCreateRow_unknownElement(t *testing.T) {
+	rpt := New("P", "A4")
+	rpt.footerHeight = 0
+	rpt.addPage()
+	row := &Row{
+		Columns: []PageItem{
+			{ItemType: "unknown", Item: struct{}{}},
+		},
+	}
+	h := rpt.createRow("details", row, false)
+	if h != 0 {
+		t.Errorf("createRow unknown element height = %v", h)
 	}
 }
